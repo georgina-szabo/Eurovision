@@ -1,1 +1,296 @@
 
+import pandas as pd 
+import requests 
+from bs4 import BeautifulSoup 
+import re
+import numpy as np
+import nltk
+nltk.download('stopwords')
+from nltk.corpus import stopwords
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+%matplotlib inline 
+nltk.download('vader_lexicon')
+sid = SentimentIntensityAnalyzer()
+
+#url to scrape
+wikiurl='https://en.wikipedia.org/wiki/List_of_Eurovision_Song_Contest_entries_(2004%E2%80%93present)'
+response=requests.get(wikiurl)
+print(response.status_code)
+
+# parse data from the html into a beautifulsoup object
+soup = BeautifulSoup(response.text, 'html.parser')
+table_class="wikitable plainrowheaders"
+
+my_tables=soup.find_all('table',{'class':"wikitable"})
+
+
+print(my_tables[0])
+
+#for table in my_tables:
+df=pd.read_html(str(my_tables))
+#print(df)
+
+#print(df[1])
+
+df0=pd.DataFrame(df[0])
+df1=pd.DataFrame(df[1])
+df2=pd.DataFrame(df[2])
+df3=pd.DataFrame(df[3])
+df4=pd.DataFrame(df[4])
+df5=pd.DataFrame(df[5])
+df6=pd.DataFrame(df[6])
+df7=pd.DataFrame(df[7])
+df8=pd.DataFrame(df[8])
+df9=pd.DataFrame(df[9])
+df10=pd.DataFrame(df[10])
+df11=pd.DataFrame(df[11])
+df12=pd.DataFrame(df[12])
+df13=pd.DataFrame(df[13])
+df14=pd.DataFrame(df[14])
+df15=pd.DataFrame(df[15])
+df16=pd.DataFrame(df[16])
+
+
+#print(df0.count())
+#print(df0.head())
+
+
+df= pd.concat([df0,df1,df2, df3, df4, df5,df6,df7,df8,df9,df10,df11,df12,df13,df14,df15,df16], axis=0)
+
+
+
+df.set_index('#')
+
+
+
+
+#df.info()
+# text cleaning
+df['Placing_clean']=df['Placing'].str.split('(').str[0]
+df['Placing_clean']=df['Placing_clean'].str.split('◁').str[0]
+df['Placing_clean']=df['Placing'].str.split(' ').str[0]
+df=df.drop(['R/O SF', 'R/O F', '#.1', 'Placing'], axis=1)
+
+
+#cleaning
+
+# placing as int
+def clean_text(text):
+    # remove backslash-apostrophe  as song names are in quotes
+    text = re.sub("\'", "", text) 
+
+    text = re.sub("[^a-zA-Z]"," ",text) #remove some non-English text strings
+    # remove whitespaces 
+    text = ' '.join(text.split()) 
+  
+    return text
+
+df['Clean_Song'] = df['Song'].apply(lambda x: clean_text(x))
+
+
+df.head(100)
+# languages
+df['Language_clean']=df['Language'].str.split('[').str[0] # some entries have [] after language -artifact from wiki tooltip
+
+df['Language_clean'].value_counts().head(50)
+# drop all non English as only doing English NLP 
+
+
+
+df_English= df[df['Language_clean'] == 'English']
+
+
+df_English=df_English.drop(['Song', 'Language', 'Language_clean', '#'], axis=1)
+
+
+df_English=df_English[['Clean_Song', 'Artist', 'Country', 'Placing_clean', 'Songwriter(s)']]
+
+df_English.info()
+
+
+
+df_English['UI']=df_English['Clean_Song']+ ' ' + df_English['Artist']
+
+# Which country won the most, which artist entered multiple times, DNQ most, most common languages? How many winners 
+import matplotlib.pyplot as plt 
+
+
+
+df_English.nunique()
+
+
+df_English['Artist'].value_counts()
+
+
+
+artist_counts=df_English['Artist'].value_counts().to_frame()
+
+# look at winners
+
+win_df = df_English.loc[df_English['Placing_clean'] =='1']
+fig, ax = plt.subplots()
+win_df['Country'].value_counts().plot(ax=ax, kind='bar')
+
+
+
+
+# look at DNQ
+#DNQ_df['Country'].nunique()
+
+DNQ_df = df_English.loc[df_English['Placing_clean'] =='DNQ']
+fig, ax = plt.subplots()
+DNQ_df['Country'].value_counts().plot(ax=ax, kind='bar')
+# get lyricsgenius API
+!pip install lyricsgenius
+from lyricsgenius import OAuth2, Genius
+client_id= 'Z6TV3xLBR5kNt9fil9CqSljs7fCUDB_QMmVgFxjoFtM-zn20FBEaC5pB5vSItK22NqtxU_utKMQjzFH8VrLCwQ'
+token='OH2W0UZMIITH_n50lrn5D3EiNWGeZOspU9AYssgMv2dYVBOmSwRiNAneJz0LPfXV'
+
+
+genius = Genius('OH2W0UZMIITH_n50lrn5D3EiNWGeZOspU9AYssgMv2dYVBOmSwRiNAneJz0LPfXV',
+                skip_non_songs=True, excluded_terms=["(Remix)", "(Live)"], remove_section_headers=True, timeout=10)
+song_artist=df_English['Clean_Song']+ ' ' + df_English['Artist']  #concat for API input 
+
+song_artist=song_artist.tolist() # make as list
+
+def get_lyrics(tune):
+  songs = genius.search_songs(tune, per_page=1)
+
+  try:
+    UI=tune
+    for tune in songs['hits']:
+        url = tune['result']['url']
+        artist_name= tune['result']['artist_names']
+        title= tune['result']['title']
+          #print(url)
+        print(title)
+        print('getting info for song: ',title)
+        song_lyrics = genius.lyrics(song_url=url)
+        #print(song_lyrics)
+    return {'artist':artist_name, 'title':title,'lyrics':song_lyrics, 'UI':UI} 
+  
+  except NameError:
+    UI=tune
+    print('cant find')
+    return {'artist':'', 'title':'','lyrics':'', 'UI':UI } 
+
+  except ReadTimeoutError:
+    UI=tune
+    print('cant find')
+    return {'artist':'', 'title':'','lyrics':'', 'UI':UI } 
+
+info = []
+for tune in song_artist:
+  info.append(get_lyrics(tune))
+
+
+
+
+
+
+
+lyric_df = pd.DataFrame(info)
+
+lyric_df.info()
+
+# join dfs 
+corpus = pd.merge(df_English, lyric_df, on = 'UI')
+
+corpus=corpus.drop(['Clean_Song', 'Artist', 'Songwriter(s)', 'UI'], axis=1)
+
+
+corpus.head(30)
+# remove blank lyrics
+# drop where lyrics is blank
+corpus= corpus.replace('',np.nan)
+corpus = corpus[corpus['lyrics'].notna()]
+# remove stop words
+
+stop_words = set(stopwords.words('english'))
+
+
+# function to remove stopwords
+def remove_stopwords(text):
+    no_stop_lyrics = [w for w in text.split() if not w in stop_words]
+    return ' '.join(no_stop_lyrics)
+
+corpus['lyrics_nostop'] = corpus['lyrics'].apply(lambda x: remove_stopwords(x))
+
+
+corpus.head()
+def clean_lyrics(text):
+
+  # remove \n for new line in song
+  text = re.sub("\n'", "", text)  
+   # remove backslash-apostrophe 
+  text = re.sub("\'", "", text) 
+  # remove everything except letters 
+  text = re.sub("[^a-zA-Z]"," ",text) 
+  # remove whitespaces 
+  text = ' '.join(text.split()) 
+
+  return text
+
+corpus['clean_lyrics_nostop'] = corpus['lyrics_nostop'].apply(lambda x: clean_text(x))
+
+corpus['clean_lyrics_nostop'] = corpus['clean_lyrics_nostop'].str.lower()
+
+
+corpus.head()
+
+
+
+# remove stop words again
+corpus['clean_lyrics_nostop'] = corpus['clean_lyrics_nostop'].apply(lambda x: remove_stopwords(x))
+
+# Visualise corpus
+# freq of words 
+
+import matplotlib.pyplot as plt 
+import seaborn as sns
+def freq_words(x, terms = 30): 
+  all_words = ' '.join([text for text in x]) 
+  all_words = all_words.split() 
+  fdist = nltk.FreqDist(all_words) 
+  words_df = pd.DataFrame({'word':list(fdist.keys()), 'count':list(fdist.values())}) 
+ 
+
+  d = words_df.nlargest(columns="count", n = terms)   
+  # visualize words and frequencies
+  plt.figure(figsize=(12,15)) 
+  ax = sns.barplot(data=d, x= "count", y = "word") 
+  ax.set(ylabel = 'Word') 
+  plt.show()
+  
+
+freq_words(corpus['clean_lyrics_nostop'], 100)
+
+# want to add more stopwords that are lyrics 
+NLTK_stop_words_list=stopwords.words('english')
+custom_stop_word_list=['oh', 'im', 'ah', 'ive', 'ha', 'ill', 'ooh', 'urlcopyembedcopy', 'embedshare', 'ooh','yeah','hey','whoa','woah', 'ohh', 'was', 'mmm', 'oooh','yah','yeh','mmm', 'hmm','deh','doh','jah','wa']
+                    
+final_stopword_list = custom_stop_word_list + NLTK_stop_words_list
+
+
+# remove new stop words
+
+def remove_stopwords(text):
+    no_stop_lyrics = [w for w in text.split() if not w in final_stopword_list]
+    return ' '.join(no_stop_lyrics)
+
+corpus['clean_lyrics_nostop'] = corpus['clean_lyrics_nostop'].apply(lambda x: remove_stopwords(x))
+
+
+
+
+
+
+
+freq_words(corpus['clean_lyrics_nostop'], 100)
+
+# Save the data to .csv
+import os
+os.makedirs('corpus', exist_ok=True)
+corpus.to_csv('cleaned_corpus.csv', index=True)
+
+
